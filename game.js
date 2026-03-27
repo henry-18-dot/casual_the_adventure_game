@@ -1,303 +1,412 @@
-const canvas = document.getElementById("game");
+const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
 const statusText = document.getElementById("status");
+const controlHint = document.getElementById("controlHint");
+const gameTabs = document.getElementById("gameTabs");
 
-const TILE = 32;
-const COLS = 20;
-const ROWS = 15;
-
+const W = canvas.width;
+const H = canvas.height;
 const keys = {};
-let gameOver = false;
-let victory = false;
-let frame = 0;
 
-const player = {
-  x: 2,
-  y: 2,
-  hp: 6,
-  maxHp: 6,
-  gold: 0,
-  facing: "down",
-  attackTimer: 0,
-};
-
-let level = 1;
-let map = [];
-let enemies = [];
-let loot = [];
-let stairs = { x: 18, y: 13 };
+function clamp(v, min, max) {
+  return Math.max(min, Math.min(max, v));
+}
 
 function rand(min, max) {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
+  return Math.random() * (max - min) + min;
 }
 
-function makeLevel() {
-  map = Array.from({ length: ROWS }, (_, y) =>
-    Array.from({ length: COLS }, (_, x) => {
-      const border = x === 0 || y === 0 || x === COLS - 1 || y === ROWS - 1;
-      if (border) return 1;
-      return Math.random() < 0.1 ? 1 : 0;
-    })
-  );
+const AgentFramework = {
+  agents: [],
+  use(game) {
+    this.agents = game.agents;
+    this.agents.forEach((a) => a.init?.(game));
+  },
+  tick(game, dt) {
+    this.agents.forEach((a) => a.update?.(game, dt));
+    this.agents.forEach((a) => a.draw?.(game, ctx));
+  },
+};
 
-  for (let y = 1; y <= 3; y++) {
-    for (let x = 1; x <= 3; x++) {
-      map[y][x] = 0;
-    }
-  }
+function createEchoTrailGame() {
+  const game = {
+    name: "1) 回声轨迹",
+    hint: "WASD/方向键移动。收集 8 个光点，躲开延迟跟随你路径的影子。",
+    state: {},
+    agents: [],
+  };
 
-  stairs = findFreeSpot();
-  enemies = Array.from({ length: 3 + level }, () => ({
-    ...findFreeSpot(),
-    hp: 2 + Math.floor(level / 2),
-    cooldown: 0,
-  }));
-  loot = Array.from({ length: 3 }, () => ({ ...findFreeSpot(), value: rand(1, 3) }));
-}
+  const logicAgent = {
+    init(g) {
+      g.state.player = { x: 80, y: 240, speed: 180 };
+      g.state.history = [];
+      g.state.shadow = { x: 80, y: 240 };
+      g.state.orbs = Array.from({ length: 8 }, () => ({ x: rand(180, 760), y: rand(40, 440), r: 8 }));
+      g.state.win = false;
+      g.state.dead = false;
+    },
+    update(g, dt) {
+      if (g.state.win || g.state.dead) return;
+      const p = g.state.player;
+      const dx = (keys.ArrowRight || keys.d ? 1 : 0) - (keys.ArrowLeft || keys.a ? 1 : 0);
+      const dy = (keys.ArrowDown || keys.s ? 1 : 0) - (keys.ArrowUp || keys.w ? 1 : 0);
+      p.x = clamp(p.x + dx * p.speed * dt, 12, W - 12);
+      p.y = clamp(p.y + dy * p.speed * dt, 12, H - 12);
 
-function findFreeSpot() {
-  while (true) {
-    const x = rand(1, COLS - 2);
-    const y = rand(1, ROWS - 2);
-    const blocked = map[y][x] === 1;
-    const occupiedByEnemy = enemies.some((e) => e.x === x && e.y === y);
-    const occupiedByLoot = loot.some((l) => l.x === x && l.y === y);
-    const startArea = x <= 3 && y <= 3;
-    if (!blocked && !occupiedByEnemy && !occupiedByLoot && !startArea) {
-      return { x, y };
-    }
-  }
-}
-
-function resetGame() {
-  level = 1;
-  player.x = 2;
-  player.y = 2;
-  player.hp = player.maxHp;
-  player.gold = 0;
-  gameOver = false;
-  victory = false;
-  makeLevel();
-}
-
-function canMoveTo(x, y) {
-  if (x < 0 || y < 0 || x >= COLS || y >= ROWS) return false;
-  if (map[y][x] === 1) return false;
-  return !enemies.some((e) => e.x === x && e.y === y);
-}
-
-function movePlayer(dx, dy) {
-  if (gameOver || victory) return;
-  const nx = player.x + dx;
-  const ny = player.y + dy;
-  if (canMoveTo(nx, ny)) {
-    player.x = nx;
-    player.y = ny;
-  }
-  if (dx === 1) player.facing = "right";
-  if (dx === -1) player.facing = "left";
-  if (dy === 1) player.facing = "down";
-  if (dy === -1) player.facing = "up";
-}
-
-function attack() {
-  if (player.attackTimer > 0 || gameOver || victory) return;
-  player.attackTimer = 10;
-  const dir = {
-    up: [0, -1],
-    down: [0, 1],
-    left: [-1, 0],
-    right: [1, 0],
-  }[player.facing];
-  const tx = player.x + dir[0];
-  const ty = player.y + dir[1];
-
-  enemies.forEach((e) => {
-    if (e.x === tx && e.y === ty) {
-      e.hp -= 1;
-    }
-  });
-  enemies = enemies.filter((e) => e.hp > 0);
-}
-
-function updateEnemies() {
-  enemies.forEach((e) => {
-    if (e.cooldown > 0) {
-      e.cooldown -= 1;
-      return;
-    }
-    e.cooldown = 12 + rand(0, 12);
-    const dx = Math.sign(player.x - e.x);
-    const dy = Math.sign(player.y - e.y);
-    const chaseX = Math.abs(player.x - e.x) > Math.abs(player.y - e.y);
-
-    const nx = e.x + (chaseX ? dx : 0);
-    const ny = e.y + (chaseX ? 0 : dy);
-
-    const blocked = map[ny][nx] === 1 || enemies.some((o) => o !== e && o.x === nx && o.y === ny);
-    if (!blocked) {
-      e.x = nx;
-      e.y = ny;
-    }
-
-    if (Math.abs(e.x - player.x) + Math.abs(e.y - player.y) === 1) {
-      player.hp -= 1;
-      if (player.hp <= 0) {
-        gameOver = true;
+      g.state.history.push({ x: p.x, y: p.y });
+      if (g.state.history.length > 180) {
+        const t = g.state.history.shift();
+        g.state.shadow.x = t.x;
+        g.state.shadow.y = t.y;
       }
-    }
-  });
+
+      g.state.orbs = g.state.orbs.filter((o) => Math.hypot(o.x - p.x, o.y - p.y) > 14);
+      if (Math.hypot(g.state.shadow.x - p.x, g.state.shadow.y - p.y) < 14) g.state.dead = true;
+      if (g.state.orbs.length === 0) g.state.win = true;
+    },
+    draw(g, c) {
+      c.fillStyle = "#060c19";
+      c.fillRect(0, 0, W, H);
+
+      c.strokeStyle = "#2f416f";
+      c.beginPath();
+      g.state.history.forEach((h, i) => {
+        if (i === 0) c.moveTo(h.x, h.y);
+        else c.lineTo(h.x, h.y);
+      });
+      c.stroke();
+
+      c.fillStyle = "#ff6a88";
+      c.beginPath();
+      c.arc(g.state.shadow.x, g.state.shadow.y, 10, 0, Math.PI * 2);
+      c.fill();
+
+      c.fillStyle = "#67e3c4";
+      g.state.orbs.forEach((o) => {
+        c.beginPath();
+        c.arc(o.x, o.y, o.r + Math.sin(performance.now() / 120) * 1.5, 0, Math.PI * 2);
+        c.fill();
+      });
+
+      c.fillStyle = "#7ab8ff";
+      c.beginPath();
+      c.arc(g.state.player.x, g.state.player.y, 10, 0, Math.PI * 2);
+      c.fill();
+
+      statusText.textContent = g.state.dead
+        ? "失败：你被自己的回声捕获。按 R 重开本游戏。"
+        : g.state.win
+          ? "成功：你驾驭了延迟追踪机制！按 R 再玩一次。"
+          : `剩余光点：${g.state.orbs.length}（影子会沿你 3 秒前路径追来）`;
+    },
+  };
+
+  game.agents = [logicAgent];
+  return game;
 }
 
-function pickupLoot() {
-  loot = loot.filter((l) => {
-    if (l.x === player.x && l.y === player.y) {
-      player.gold += l.value;
-      return false;
-    }
-    return true;
-  });
-}
+function createGravityFlipGame() {
+  const game = { name: "2) 重力翻面", hint: "A/D 或 ←/→ 横移，空格切换重力方向。穿过动态缝隙到达右侧终点。", state: {}, agents: [] };
 
-function checkProgress() {
-  if (player.x === stairs.x && player.y === stairs.y && enemies.length === 0) {
-    level += 1;
-    player.x = 2;
-    player.y = 2;
-    player.hp = Math.min(player.maxHp, player.hp + 2);
-    if (level > 3) {
-      victory = true;
-      return;
-    }
-    makeLevel();
-  }
-}
+  const logic = {
+    init(g) {
+      g.state.p = { x: 40, y: 420, vx: 0, vy: 0, r: 10, grav: 1 };
+      g.state.t = 0;
+      g.state.win = false;
+      g.state.dead = false;
+    },
+    update(g, dt) {
+      if (g.state.win || g.state.dead) return;
+      g.state.t += dt;
+      const p = g.state.p;
+      const ax = ((keys.d || keys.ArrowRight) ? 1 : 0) - ((keys.a || keys.ArrowLeft) ? 1 : 0);
+      p.vx = ax * 180;
+      p.vy += 620 * p.grav * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
 
-function drawTile(x, y, color) {
-  ctx.fillStyle = color;
-  ctx.fillRect(x * TILE, y * TILE, TILE, TILE);
-}
+      if (p.y > H - p.r) { p.y = H - p.r; p.vy = 0; }
+      if (p.y < p.r) { p.y = p.r; p.vy = 0; }
+      p.x = clamp(p.x, p.r, W - p.r);
 
-function draw() {
-  frame += 1;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-  for (let y = 0; y < ROWS; y++) {
-    for (let x = 0; x < COLS; x++) {
-      const wall = map[y][x] === 1;
-      drawTile(x, y, wall ? "#25314f" : "#141c34");
-      if (wall) {
-        ctx.fillStyle = "#3e5285";
-        ctx.fillRect(x * TILE + 4, y * TILE + 4, TILE - 8, TILE - 8);
+      for (let i = 0; i < 4; i++) {
+        const x = 180 + i * 150;
+        const center = 240 + Math.sin(g.state.t * 1.6 + i) * 120;
+        const gap = 90;
+        if (Math.abs(p.x - x) < 14 && (p.y < center - gap / 2 || p.y > center + gap / 2)) g.state.dead = true;
       }
-    }
-  }
+      if (p.x > W - 32) g.state.win = true;
+    },
+    draw(g, c) {
+      c.fillStyle = "#070a14";
+      c.fillRect(0, 0, W, H);
+      c.fillStyle = "#1e2c4e";
+      for (let i = 0; i < 4; i++) {
+        const x = 180 + i * 150;
+        const center = 240 + Math.sin(g.state.t * 1.6 + i) * 120;
+        const gap = 90;
+        c.fillRect(x - 6, 0, 12, center - gap / 2);
+        c.fillRect(x - 6, center + gap / 2, 12, H);
+      }
+      c.fillStyle = "#6cf0ca";
+      c.fillRect(W - 20, 0, 20, H);
 
-  drawTile(stairs.x, stairs.y, enemies.length === 0 ? "#2e8b57" : "#556" );
+      c.fillStyle = g.state.p.grav > 0 ? "#7ab8ff" : "#ffd166";
+      c.beginPath();
+      c.arc(g.state.p.x, g.state.p.y, g.state.p.r, 0, Math.PI * 2);
+      c.fill();
 
-  loot.forEach((l) => {
-    ctx.fillStyle = "#ffcc33";
-    ctx.beginPath();
-    ctx.arc(l.x * TILE + 16, l.y * TILE + 16, 6, 0, Math.PI * 2);
-    ctx.fill();
-  });
+      statusText.textContent = g.state.dead
+        ? "失败：撞上了动态墙。按 R 重开。"
+        : g.state.win
+          ? "成功：你完成了反重力穿越！按 R 重开。"
+          : `重力方向：${g.state.p.grav > 0 ? "向下" : "向上"}（空格翻转）`;
+    },
+  };
 
-  enemies.forEach((e) => {
-    drawTile(e.x, e.y, "#91263c");
-    ctx.fillStyle = "#ff8ca0";
-    ctx.fillRect(e.x * TILE + 10, e.y * TILE + 8, 12, 16);
-  });
-
-  drawTile(player.x, player.y, "#1f6feb");
-  ctx.fillStyle = "#9fd0ff";
-  ctx.fillRect(player.x * TILE + 9, player.y * TILE + 7, 14, 18);
-
-  if (player.attackTimer > 0) {
-    player.attackTimer -= 1;
-    const dir = {
-      up: [0, -1],
-      down: [0, 1],
-      left: [-1, 0],
-      right: [1, 0],
-    }[player.facing];
-    ctx.fillStyle = "#e6edf3";
-    ctx.fillRect((player.x + dir[0]) * TILE + 12, (player.y + dir[1]) * TILE + 12, 8, 8);
-  }
-
-  ctx.fillStyle = "rgba(0,0,0,.45)";
-  ctx.fillRect(0, 0, canvas.width, 28);
-  ctx.fillStyle = "#f0f6ff";
-  ctx.font = "16px Verdana";
-  ctx.fillText(`生命: ${"❤".repeat(Math.max(player.hp, 0))}   金币: ${player.gold}   层数: ${level}/3`, 10, 19);
-
-  if (gameOver || victory) {
-    ctx.fillStyle = "rgba(0,0,0,.65)";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = victory ? "#ffd166" : "#ff7b93";
-    ctx.font = "bold 36px Verdana";
-    ctx.fillText(victory ? "你成功逃离地下城！" : "你被击败了", 120, 220);
-    ctx.font = "20px Verdana";
-    ctx.fillStyle = "#d7e3ff";
-    ctx.fillText("按 R 重新开始", 240, 265);
-  }
-
-  statusText.textContent = gameOver
-    ? "状态：冒险失败。"
-    : victory
-      ? "状态：胜利！"
-      : enemies.length > 0
-        ? `状态：清理敌人后前往出口（剩余敌人 ${enemies.length}）`
-        : "状态：出口已开启，前往绿色楼梯！";
+  game.agents = [logic];
+  return game;
 }
 
-function gameLoop() {
-  if (!gameOver && !victory) {
-    updateEnemies();
-    pickupLoot();
-    checkProgress();
-  }
-  draw();
-  requestAnimationFrame(gameLoop);
+function createRewindGame() {
+  const game = { name: "3) 时序倒带", hint: "移动到右侧终点。按住 Shift 倒带 2 秒轨迹，躲开扫描线。", state: {}, agents: [] };
+  const logic = {
+    init(g) {
+      g.state.p = { x: 50, y: 240, speed: 190 };
+      g.state.trail = [];
+      g.state.beams = [120, 220, 320];
+      g.state.time = 0;
+      g.state.dead = false;
+      g.state.win = false;
+    },
+    update(g, dt) {
+      if (g.state.dead || g.state.win) return;
+      g.state.time += dt;
+      const p = g.state.p;
+      const dx = (keys.d || keys.ArrowRight ? 1 : 0) - (keys.a || keys.ArrowLeft ? 1 : 0);
+      const dy = (keys.s || keys.ArrowDown ? 1 : 0) - (keys.w || keys.ArrowUp ? 1 : 0);
+
+      g.state.trail.push({ x: p.x, y: p.y });
+      if (g.state.trail.length > 150) g.state.trail.shift();
+
+      if (keys.Shift && g.state.trail.length > 0) {
+        const back = g.state.trail.pop();
+        p.x = back.x;
+        p.y = back.y;
+      } else {
+        p.x = clamp(p.x + dx * p.speed * dt, 12, W - 12);
+        p.y = clamp(p.y + dy * p.speed * dt, 12, H - 12);
+      }
+
+      const sweep = (Math.sin(g.state.time * 1.8) * 0.5 + 0.5) * W;
+      if (Math.abs(p.x - sweep) < 10 && g.state.beams.some((y) => Math.abs(y - p.y) < 55)) g.state.dead = true;
+      if (p.x > W - 36) g.state.win = true;
+    },
+    draw(g, c) {
+      c.fillStyle = "#090d1a";
+      c.fillRect(0, 0, W, H);
+      c.fillStyle = "#1e2e56";
+      g.state.beams.forEach((y) => c.fillRect(0, y - 2, W, 4));
+      const sweep = (Math.sin(g.state.time * 1.8) * 0.5 + 0.5) * W;
+      c.fillStyle = "rgba(255,120,140,.28)";
+      c.fillRect(sweep - 10, 0, 20, H);
+
+      c.fillStyle = "#ffd166";
+      c.fillRect(W - 20, 0, 20, H);
+
+      c.fillStyle = keys.Shift ? "#7af0cb" : "#8fb8ff";
+      c.beginPath();
+      c.arc(g.state.p.x, g.state.p.y, 10, 0, Math.PI * 2);
+      c.fill();
+
+      statusText.textContent = g.state.dead
+        ? "失败：被扫描线命中。按 R 重开。"
+        : g.state.win
+          ? "成功：你掌握了时序倒带！按 R 重开。"
+          : `倒带缓存：${g.state.trail.length} 帧（按住 Shift 逆转）`;
+    },
+  };
+  game.agents = [logic];
+  return game;
 }
 
-window.addEventListener("keydown", (e) => {
-  keys[e.key.toLowerCase()] = true;
+function createRhythmGame() {
+  const game = { name: "4) 脉冲走廊", hint: "仅左右移动。节拍脉冲扩散时会短暂开门，抓窗口穿越 6 道门。", state: {}, agents: [] };
+  const logic = {
+    init(g) {
+      g.state.p = { x: 30, y: 240, r: 10 };
+      g.state.time = 0;
+      g.state.win = false;
+      g.state.dead = false;
+    },
+    update(g, dt) {
+      if (g.state.dead || g.state.win) return;
+      g.state.time += dt;
+      const p = g.state.p;
+      p.x = clamp(p.x + (((keys.d || keys.ArrowRight) ? 1 : 0) - ((keys.a || keys.ArrowLeft) ? 1 : 0)) * 170 * dt, 10, W - 10);
 
-  if (["arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(e.key.toLowerCase())) {
-    e.preventDefault();
-  }
+      for (let i = 0; i < 6; i++) {
+        const x = 130 + i * 105;
+        const phase = (g.state.time * 2.2 + i * 0.7) % (Math.PI * 2);
+        const gateOpen = Math.sin(phase) > 0.72;
+        if (!gateOpen && Math.abs(p.x - x) < 9) g.state.dead = true;
+      }
+      if (p.x > W - 24) g.state.win = true;
+    },
+    draw(g, c) {
+      c.fillStyle = "#090a12";
+      c.fillRect(0, 0, W, H);
+      for (let i = 0; i < 6; i++) {
+        const x = 130 + i * 105;
+        const phase = (g.state.time * 2.2 + i * 0.7) % (Math.PI * 2);
+        const gateOpen = Math.sin(phase) > 0.72;
+        c.fillStyle = gateOpen ? "#3f8f7b" : "#7c2c42";
+        c.fillRect(x - 5, 0, 10, H);
 
-  switch (e.key.toLowerCase()) {
-    case "arrowup":
-    case "w":
-      movePlayer(0, -1);
-      break;
-    case "arrowdown":
-    case "s":
-      movePlayer(0, 1);
-      break;
-    case "arrowleft":
-    case "a":
-      movePlayer(-1, 0);
-      break;
-    case "arrowright":
-    case "d":
-      movePlayer(1, 0);
-      break;
-    case " ":
-      attack();
-      break;
-    case "r":
-      resetGame();
-      break;
-    default:
-      break;
+        const pulse = (Math.sin(g.state.time * 2.2 - i * 0.2) + 1) * 0.5;
+        c.strokeStyle = `rgba(113,241,203,${0.1 + pulse * 0.45})`;
+        c.beginPath();
+        c.arc(x, H / 2, 20 + pulse * 30, 0, Math.PI * 2);
+        c.stroke();
+      }
+
+      c.fillStyle = "#ffd166";
+      c.fillRect(W - 20, 0, 20, H);
+
+      c.fillStyle = "#8ab7ff";
+      c.beginPath();
+      c.arc(g.state.p.x, g.state.p.y, g.state.p.r, 0, Math.PI * 2);
+      c.fill();
+
+      statusText.textContent = g.state.dead
+        ? "失败：错过节拍窗口。按 R 重开。"
+        : g.state.win
+          ? "成功：你完成了节奏穿门！按 R 重开。"
+          : "观察门颜色：绿开红关，节拍窗口很短。";
+    },
+  };
+  game.agents = [logic];
+  return game;
+}
+
+function createMirageGame() {
+  const game = { name: "5) 蜃楼择门", hint: "上下移动选择门，空格进入。地图每 3 秒重排；选中真正出口 3 次获胜。", state: {}, agents: [] };
+  const logic = {
+    init(g) {
+      g.state.cursor = 1;
+      g.state.timer = 3;
+      g.state.real = Math.floor(rand(0, 3));
+      g.state.score = 0;
+      g.state.dead = false;
+      g.state.win = false;
+      g.state.lock = 0;
+    },
+    update(g, dt) {
+      if (g.state.dead || g.state.win) return;
+      g.state.timer -= dt;
+      g.state.lock -= dt;
+      if (g.state.timer <= 0) {
+        g.state.timer = 3;
+        g.state.real = Math.floor(rand(0, 3));
+      }
+      if (g.state.lock <= 0) {
+        if (keys.ArrowUp || keys.w) { g.state.cursor = (g.state.cursor + 2) % 3; g.state.lock = 0.16; }
+        if (keys.ArrowDown || keys.s) { g.state.cursor = (g.state.cursor + 1) % 3; g.state.lock = 0.16; }
+      }
+    },
+    draw(g, c) {
+      c.fillStyle = "#060913";
+      c.fillRect(0, 0, W, H);
+      for (let i = 0; i < 3; i++) {
+        const y = 120 + i * 120;
+        c.fillStyle = i === g.state.cursor ? "#294b82" : "#1a2745";
+        c.fillRect(280, y - 40, 240, 80);
+        c.fillStyle = "#cde0ff";
+        c.font = "18px sans-serif";
+        c.fillText(`门 ${i + 1}`, 380, y + 6);
+      }
+      c.fillStyle = "#7af0cb";
+      c.fillText(`重排倒计时：${g.state.timer.toFixed(1)}s`, 22, 36);
+      c.fillText(`正确次数：${g.state.score}/3`, 22, 64);
+
+      statusText.textContent = g.state.dead
+        ? "失败：进入了幻门。按 R 重开。"
+        : g.state.win
+          ? "成功：你识破了蜃楼规律！按 R 重开。"
+          : "每次重排后真实门会变化，观察节奏后再赌。";
+    },
+  };
+
+  const inputAgent = {
+    update(g) {
+      if ((keys[" "] || keys.Spacebar) && !g.state.dead && !g.state.win) {
+        keys[" "] = false;
+        if (g.state.cursor === g.state.real) {
+          g.state.score += 1;
+          g.state.real = Math.floor(rand(0, 3));
+          g.state.timer = 3;
+          if (g.state.score >= 3) g.state.win = true;
+        } else {
+          g.state.dead = true;
+        }
+      }
+    },
+  };
+
+  game.agents = [logic, inputAgent];
+  return game;
+}
+
+const games = [
+  createEchoTrailGame(),
+  createGravityFlipGame(),
+  createRewindGame(),
+  createRhythmGame(),
+  createMirageGame(),
+];
+
+let activeIndex = 0;
+let lastTs = performance.now();
+
+function mountTabs() {
+  gameTabs.innerHTML = "";
+  games.forEach((g, i) => {
+    const btn = document.createElement("button");
+    btn.className = `tab-btn ${i === activeIndex ? "active" : ""}`;
+    btn.textContent = g.name;
+    btn.addEventListener("click", () => switchGame(i));
+    gameTabs.appendChild(btn);
+  });
+}
+
+function switchGame(i) {
+  activeIndex = i;
+  mountTabs();
+  AgentFramework.use(games[activeIndex]);
+  controlHint.textContent = `操作：${games[activeIndex].hint}`;
+}
+
+document.addEventListener("keydown", (e) => {
+  keys[e.key] = true;
+  if (e.key === " ") e.preventDefault();
+
+  if (e.key.toLowerCase() === "r") switchGame(activeIndex);
+  if (e.key === " ") {
+    const g = games[activeIndex];
+    if (g.name.includes("重力翻面") && !g.state.dead && !g.state.win) g.state.p.grav *= -1;
   }
 });
 
-window.addEventListener("keyup", (e) => {
-  keys[e.key.toLowerCase()] = false;
+document.addEventListener("keyup", (e) => {
+  keys[e.key] = false;
 });
 
-resetGame();
-gameLoop();
+function loop(ts) {
+  const dt = Math.min((ts - lastTs) / 1000, 0.033);
+  lastTs = ts;
+  AgentFramework.tick(games[activeIndex], dt);
+  requestAnimationFrame(loop);
+}
+
+switchGame(0);
+requestAnimationFrame(loop);

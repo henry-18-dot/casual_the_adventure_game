@@ -3,18 +3,47 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>迷你地下城冒险</title>
+    <title>极简动态冒险实验场（5 合 1）</title>
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <div class="game-shell">
-      <h1>迷你地下城冒险</h1>
-      <canvas id="game" width="640" height="480" aria-label="2D 地下城游戏画面"></canvas>
-      <div class="hud">
-        <p><strong>操作：</strong>方向键 / WASD 移动，<kbd>空格</kbd>挥剑，<kbd>R</kbd>重开</p>
-        <p id="status">加载中...</p>
-      </div>
-    </div>
+    <main class="app">
+      <header>
+        <h1>极简动态冒险实验场</h1>
+        <p>5 个小游戏 / 1 套 Agent 框架 / 先核心玩法后美术</p>
+      </header>
+
+      <section class="meta-grid">
+        <article class="panel">
+          <h2>创新模式参考（主流）</h2>
+          <ul>
+            <li>时间操控（倒带/时间冻结）</li>
+            <li>重力反转与空间规则变化</li>
+            <li>节奏驱动的移动与战斗窗口</li>
+            <li>程序化风险收益（随机事件）</li>
+            <li>信息不对称与地图重构</li>
+          </ul>
+        </article>
+        <article class="panel">
+          <h2>本轮执行 Plan（自我约束）</h2>
+          <ol>
+            <li>每个游戏只保留 1 个核心机制。</li>
+            <li>每个游戏必须有“动态变化”系统。</li>
+            <li>每个游戏可在 10 秒内理解，60 秒内上手。</li>
+            <li>代码统一走 Agent 生命周期（init/update/draw）。</li>
+          </ol>
+        </article>
+      </section>
+
+      <nav id="gameTabs" class="tabs" aria-label="小游戏选择"></nav>
+      <canvas id="gameCanvas" width="800" height="480" aria-label="游戏主画布"></canvas>
+
+      <section class="panel hud">
+        <p id="controlHint"></p>
+        <p id="status">初始化中...</p>
+      </section>
+    </main>
+
     <script src="game.js"></script>
   </body>
 </html>
