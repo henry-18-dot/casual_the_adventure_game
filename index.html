@@ -3,42 +3,43 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>极简动态冒险实验场（5 合 1）</title>
+    <title>艾斯塔拉编年史：五章试炼</title>
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
     <main class="app">
       <header>
-        <h1>极简动态冒险实验场</h1>
-        <p>5 个小游戏 / 1 套 Agent 框架 / 先核心玩法后美术</p>
+        <h1>艾斯塔拉编年史：五章试炼</h1>
+        <p>同一奇幻世界观下的 5 个独立创新冒险小游戏（核心玩法优先）</p>
       </header>
 
       <section class="meta-grid">
         <article class="panel">
-          <h2>创新模式参考（主流）</h2>
+          <h2>世界观锚点（经典奇幻）</h2>
           <ul>
-            <li>时间操控（倒带/时间冻结）</li>
-            <li>重力反转与空间规则变化</li>
-            <li>节奏驱动的移动与战斗窗口</li>
-            <li>程序化风险收益（随机事件）</li>
-            <li>信息不对称与地图重构</li>
+            <li>冒险者公会与酒馆委托</li>
+            <li>精灵林地与古代符文遗迹</li>
+            <li>矮人矿井与机关工艺</li>
+            <li>巨龙山脊与龙焰威胁</li>
+            <li>高塔法师与奥术试炼</li>
           </ul>
         </article>
         <article class="panel">
-          <h2>本轮执行 Plan（自我约束）</h2>
+          <h2>执行计划（已落地）</h2>
           <ol>
-            <li>每个游戏只保留 1 个核心机制。</li>
-            <li>每个游戏必须有“动态变化”系统。</li>
-            <li>每个游戏可在 10 秒内理解，60 秒内上手。</li>
-            <li>代码统一走 Agent 生命周期（init/update/draw）。</li>
+            <li>5 个游戏彼此独立，可单独重开。</li>
+            <li>统一 Agent 生命周期：init / update / draw。</li>
+            <li>每个游戏只做一个创新核心机制。</li>
+            <li>画面极简，但反馈必须清晰动态。</li>
           </ol>
         </article>
       </section>
 
-      <nav id="gameTabs" class="tabs" aria-label="小游戏选择"></nav>
-      <canvas id="gameCanvas" width="800" height="480" aria-label="游戏主画布"></canvas>
+      <nav id="gameTabs" class="tabs" aria-label="章节选择"></nav>
+      <canvas id="gameCanvas" width="900" height="500" aria-label="游戏主画布"></canvas>
 
       <section class="panel hud">
+        <p id="chapterTitle"></p>
         <p id="controlHint"></p>
         <p id="status">初始化中...</p>
       </section>

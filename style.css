@@ -3,8 +3,8 @@
   --panel: #10172d;
   --ink: #e9efff;
   --sub: #9eb2de;
-  --accent: #71f1cb;
-  --danger: #ff728e;
+  --accent: #f6d365;
+  --emerald: #71f1cb;
 }
 
 * { box-sizing: border-box; }
@@ -17,7 +17,7 @@ body {
 }
 
 .app {
-  width: min(1000px, 96vw);
+  width: min(1080px, 96vw);
   margin: 14px auto;
 }
 
@@ -26,7 +26,7 @@ header p { margin: 4px 0 14px; color: var(--sub); }
 
 .meta-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 10px;
   margin-bottom: 10px;
 }
@@ -43,7 +43,11 @@ header p { margin: 4px 0 14px; color: var(--sub); }
   font-size: 16px;
 }
 
-.panel ul, .panel ol { margin: 0; padding-left: 18px; color: var(--sub); }
+.panel ul, .panel ol {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--sub);
+}
 
 .tabs {
   display: flex;
@@ -62,8 +66,8 @@ header p { margin: 4px 0 14px; color: var(--sub); }
 }
 
 .tab-btn.active {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent) inset;
+  border-color: var(--emerald);
+  box-shadow: 0 0 0 1px var(--emerald) inset;
 }
 
 canvas {
@@ -74,5 +78,6 @@ canvas {
 }
 
 .hud { margin-top: 10px; }
+#chapterTitle { margin: 0 0 6px; color: var(--accent); font-weight: 700; }
 #controlHint { margin: 0 0 5px; color: #d5e3ff; }
 #status { margin: 0; color: var(--sub); }
