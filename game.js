@@ -1,303 +1,561 @@
-const canvas = document.getElementById("game");
+const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
+const gameTabs = document.getElementById("gameTabs");
+const chapterTitle = document.getElementById("chapterTitle");
+const controlHint = document.getElementById("controlHint");
 const statusText = document.getElementById("status");
 
-const TILE = 32;
-const COLS = 20;
-const ROWS = 15;
-
+const W = canvas.width;
+const H = canvas.height;
 const keys = {};
-let gameOver = false;
-let victory = false;
-let frame = 0;
 
-const player = {
-  x: 2,
-  y: 2,
-  hp: 6,
-  maxHp: 6,
-  gold: 0,
-  facing: "down",
-  attackTimer: 0,
-};
-
-let level = 1;
-let map = [];
-let enemies = [];
-let loot = [];
-let stairs = { x: 18, y: 13 };
+function clamp(v, min, max) {
+  return Math.max(min, Math.min(max, v));
+}
 
 function rand(min, max) {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
+  return Math.random() * (max - min) + min;
 }
 
-function makeLevel() {
-  map = Array.from({ length: ROWS }, (_, y) =>
-    Array.from({ length: COLS }, (_, x) => {
-      const border = x === 0 || y === 0 || x === COLS - 1 || y === ROWS - 1;
-      if (border) return 1;
-      return Math.random() < 0.1 ? 1 : 0;
-    })
-  );
-
-  for (let y = 1; y <= 3; y++) {
-    for (let x = 1; x <= 3; x++) {
-      map[y][x] = 0;
-    }
-  }
-
-  stairs = findFreeSpot();
-  enemies = Array.from({ length: 3 + level }, () => ({
-    ...findFreeSpot(),
-    hp: 2 + Math.floor(level / 2),
-    cooldown: 0,
-  }));
-  loot = Array.from({ length: 3 }, () => ({ ...findFreeSpot(), value: rand(1, 3) }));
+function circleHit(a, b, r = 14) {
+  return Math.hypot(a.x - b.x, a.y - b.y) < r;
 }
 
-function findFreeSpot() {
-  while (true) {
-    const x = rand(1, COLS - 2);
-    const y = rand(1, ROWS - 2);
-    const blocked = map[y][x] === 1;
-    const occupiedByEnemy = enemies.some((e) => e.x === x && e.y === y);
-    const occupiedByLoot = loot.some((l) => l.x === x && l.y === y);
-    const startArea = x <= 3 && y <= 3;
-    if (!blocked && !occupiedByEnemy && !occupiedByLoot && !startArea) {
-      return { x, y };
-    }
-  }
+const AgentEngine = {
+  agents: [],
+  mount(game) {
+    this.agents = game.agents;
+    this.agents.forEach((agent) => agent.init?.(game));
+  },
+  step(game, dt) {
+    this.agents.forEach((agent) => agent.update?.(game, dt));
+    this.agents.forEach((agent) => agent.draw?.(game, ctx));
+  },
+};
+
+function drawBanner(game) {
+  ctx.fillStyle = "rgba(0,0,0,.35)";
+  ctx.fillRect(0, 0, W, 34);
+  ctx.fillStyle = "#f1e4b0";
+  ctx.font = "15px sans-serif";
+  ctx.fillText(`${game.chapter} · ${game.name}`, 12, 22);
 }
 
-function resetGame() {
-  level = 1;
-  player.x = 2;
-  player.y = 2;
-  player.hp = player.maxHp;
-  player.gold = 0;
-  gameOver = false;
-  victory = false;
-  makeLevel();
-}
+function createGuildCourierGame() {
+  const game = {
+    chapter: "第一章",
+    name: "王都酒馆：卷轴速递",
+    hint: "W/S 或 ↑/↓ 切换车道，躲避盗匪并收集 6 封公会密函。",
+    state: {},
+    agents: [],
+  };
 
-function canMoveTo(x, y) {
-  if (x < 0 || y < 0 || x >= COLS || y >= ROWS) return false;
-  if (map[y][x] === 1) return false;
-  return !enemies.some((e) => e.x === x && e.y === y);
-}
+  const logic = {
+    init(g) {
+      g.state.player = { lane: 1, x: 150, y: 250 };
+      g.state.lanes = [140, 250, 360];
+      g.state.bandits = [];
+      g.state.letters = [];
+      g.state.spawn = 0;
+      g.state.pickups = 0;
+      g.state.hp = 3;
+      g.state.win = false;
+      g.state.dead = false;
+      g.state.keyLock = false;
+    },
+    update(g, dt) {
+      if (g.state.win || g.state.dead) return;
+      const s = g.state;
 
-function movePlayer(dx, dy) {
-  if (gameOver || victory) return;
-  const nx = player.x + dx;
-  const ny = player.y + dy;
-  if (canMoveTo(nx, ny)) {
-    player.x = nx;
-    player.y = ny;
-  }
-  if (dx === 1) player.facing = "right";
-  if (dx === -1) player.facing = "left";
-  if (dy === 1) player.facing = "down";
-  if (dy === -1) player.facing = "up";
-}
-
-function attack() {
-  if (player.attackTimer > 0 || gameOver || victory) return;
-  player.attackTimer = 10;
-  const dir = {
-    up: [0, -1],
-    down: [0, 1],
-    left: [-1, 0],
-    right: [1, 0],
-  }[player.facing];
-  const tx = player.x + dir[0];
-  const ty = player.y + dir[1];
-
-  enemies.forEach((e) => {
-    if (e.x === tx && e.y === ty) {
-      e.hp -= 1;
-    }
-  });
-  enemies = enemies.filter((e) => e.hp > 0);
-}
-
-function updateEnemies() {
-  enemies.forEach((e) => {
-    if (e.cooldown > 0) {
-      e.cooldown -= 1;
-      return;
-    }
-    e.cooldown = 12 + rand(0, 12);
-    const dx = Math.sign(player.x - e.x);
-    const dy = Math.sign(player.y - e.y);
-    const chaseX = Math.abs(player.x - e.x) > Math.abs(player.y - e.y);
-
-    const nx = e.x + (chaseX ? dx : 0);
-    const ny = e.y + (chaseX ? 0 : dy);
-
-    const blocked = map[ny][nx] === 1 || enemies.some((o) => o !== e && o.x === nx && o.y === ny);
-    if (!blocked) {
-      e.x = nx;
-      e.y = ny;
-    }
-
-    if (Math.abs(e.x - player.x) + Math.abs(e.y - player.y) === 1) {
-      player.hp -= 1;
-      if (player.hp <= 0) {
-        gameOver = true;
+      if (!s.keyLock && (keys.w || keys.ArrowUp)) {
+        s.player.lane = (s.player.lane + 2) % 3;
+        s.keyLock = true;
       }
-    }
-  });
-}
-
-function pickupLoot() {
-  loot = loot.filter((l) => {
-    if (l.x === player.x && l.y === player.y) {
-      player.gold += l.value;
-      return false;
-    }
-    return true;
-  });
-}
-
-function checkProgress() {
-  if (player.x === stairs.x && player.y === stairs.y && enemies.length === 0) {
-    level += 1;
-    player.x = 2;
-    player.y = 2;
-    player.hp = Math.min(player.maxHp, player.hp + 2);
-    if (level > 3) {
-      victory = true;
-      return;
-    }
-    makeLevel();
-  }
-}
-
-function drawTile(x, y, color) {
-  ctx.fillStyle = color;
-  ctx.fillRect(x * TILE, y * TILE, TILE, TILE);
-}
-
-function draw() {
-  frame += 1;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-  for (let y = 0; y < ROWS; y++) {
-    for (let x = 0; x < COLS; x++) {
-      const wall = map[y][x] === 1;
-      drawTile(x, y, wall ? "#25314f" : "#141c34");
-      if (wall) {
-        ctx.fillStyle = "#3e5285";
-        ctx.fillRect(x * TILE + 4, y * TILE + 4, TILE - 8, TILE - 8);
+      if (!s.keyLock && (keys.s || keys.ArrowDown)) {
+        s.player.lane = (s.player.lane + 1) % 3;
+        s.keyLock = true;
       }
-    }
-  }
+      if (!keys.w && !keys.s && !keys.ArrowUp && !keys.ArrowDown) s.keyLock = false;
+      s.player.y = s.lanes[s.player.lane];
 
-  drawTile(stairs.x, stairs.y, enemies.length === 0 ? "#2e8b57" : "#556" );
+      s.spawn -= dt;
+      if (s.spawn <= 0) {
+        s.spawn = rand(0.4, 0.8);
+        const lane = Math.floor(rand(0, 3));
+        if (Math.random() < 0.65) {
+          s.bandits.push({ x: W + 20, y: s.lanes[lane], vx: rand(280, 380) });
+        } else {
+          s.letters.push({ x: W + 20, y: s.lanes[lane], vx: rand(220, 300) });
+        }
+      }
 
-  loot.forEach((l) => {
-    ctx.fillStyle = "#ffcc33";
-    ctx.beginPath();
-    ctx.arc(l.x * TILE + 16, l.y * TILE + 16, 6, 0, Math.PI * 2);
-    ctx.fill();
-  });
+      s.bandits.forEach((b) => (b.x -= b.vx * dt));
+      s.letters.forEach((m) => (m.x -= m.vx * dt));
+      s.bandits = s.bandits.filter((b) => b.x > -40);
+      s.letters = s.letters.filter((m) => m.x > -40);
 
-  enemies.forEach((e) => {
-    drawTile(e.x, e.y, "#91263c");
-    ctx.fillStyle = "#ff8ca0";
-    ctx.fillRect(e.x * TILE + 10, e.y * TILE + 8, 12, 16);
-  });
+      const p = { x: s.player.x, y: s.player.y };
+      s.bandits = s.bandits.filter((b) => {
+        if (circleHit(p, b, 22)) {
+          s.hp -= 1;
+          return false;
+        }
+        return true;
+      });
+      s.letters = s.letters.filter((m) => {
+        if (circleHit(p, m, 20)) {
+          s.pickups += 1;
+          return false;
+        }
+        return true;
+      });
 
-  drawTile(player.x, player.y, "#1f6feb");
-  ctx.fillStyle = "#9fd0ff";
-  ctx.fillRect(player.x * TILE + 9, player.y * TILE + 7, 14, 18);
+      if (s.hp <= 0) s.dead = true;
+      if (s.pickups >= 6) s.win = true;
+    },
+    draw(g, c) {
+      const s = g.state;
+      c.fillStyle = "#12141f";
+      c.fillRect(0, 0, W, H);
+      c.fillStyle = "#3f2f24";
+      s.lanes.forEach((y) => c.fillRect(0, y - 28, W, 56));
+      c.strokeStyle = "#6f5641";
+      c.setLineDash([12, 12]);
+      s.lanes.forEach((y) => {
+        c.beginPath();
+        c.moveTo(0, y);
+        c.lineTo(W, y);
+        c.stroke();
+      });
+      c.setLineDash([]);
 
-  if (player.attackTimer > 0) {
-    player.attackTimer -= 1;
-    const dir = {
-      up: [0, -1],
-      down: [0, 1],
-      left: [-1, 0],
-      right: [1, 0],
-    }[player.facing];
-    ctx.fillStyle = "#e6edf3";
-    ctx.fillRect((player.x + dir[0]) * TILE + 12, (player.y + dir[1]) * TILE + 12, 8, 8);
-  }
+      c.fillStyle = "#6ec5ff";
+      c.fillRect(s.player.x - 16, s.player.y - 16, 32, 32);
+      c.fillStyle = "#f7e7a5";
+      s.letters.forEach((m) => c.fillRect(m.x - 8, m.y - 8, 16, 16));
+      c.fillStyle = "#d86b7e";
+      s.bandits.forEach((b) => c.fillRect(b.x - 11, b.y - 11, 22, 22));
 
-  ctx.fillStyle = "rgba(0,0,0,.45)";
-  ctx.fillRect(0, 0, canvas.width, 28);
-  ctx.fillStyle = "#f0f6ff";
-  ctx.font = "16px Verdana";
-  ctx.fillText(`生命: ${"❤".repeat(Math.max(player.hp, 0))}   金币: ${player.gold}   层数: ${level}/3`, 10, 19);
+      drawBanner(g);
+      statusText.textContent = s.dead
+        ? "任务失败：密函被截断。按 R 重开本章。"
+        : s.win
+          ? "任务成功：你完成了公会首个委托！按 R 重开。"
+          : `密函 ${s.pickups}/6 · 生命 ${s.hp}`;
+    },
+  };
 
-  if (gameOver || victory) {
-    ctx.fillStyle = "rgba(0,0,0,.65)";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = victory ? "#ffd166" : "#ff7b93";
-    ctx.font = "bold 36px Verdana";
-    ctx.fillText(victory ? "你成功逃离地下城！" : "你被击败了", 120, 220);
-    ctx.font = "20px Verdana";
-    ctx.fillStyle = "#d7e3ff";
-    ctx.fillText("按 R 重新开始", 240, 265);
-  }
-
-  statusText.textContent = gameOver
-    ? "状态：冒险失败。"
-    : victory
-      ? "状态：胜利！"
-      : enemies.length > 0
-        ? `状态：清理敌人后前往出口（剩余敌人 ${enemies.length}）`
-        : "状态：出口已开启，前往绿色楼梯！";
+  game.agents = [logic];
+  return game;
 }
 
-function gameLoop() {
-  if (!gameOver && !victory) {
-    updateEnemies();
-    pickupLoot();
-    checkProgress();
-  }
-  draw();
-  requestAnimationFrame(gameLoop);
+function createElvenRunesGame() {
+  const game = {
+    chapter: "第二章",
+    name: "银叶林地：符文点灯",
+    hint: "移动采集灵火并按顺序点亮 5 个精灵符文柱；迷雾会周期收缩视野。",
+    state: {},
+    agents: [],
+  };
+
+  const logic = {
+    init(g) {
+      g.state.p = { x: 100, y: 250, speed: 190 };
+      g.state.time = 0;
+      g.state.nextRune = 0;
+      g.state.runes = Array.from({ length: 5 }, (_, i) => ({ x: 180 + i * 140, y: 140 + (i % 2) * 190 }));
+      g.state.wisps = Array.from({ length: 12 }, () => ({ x: rand(90, 860), y: rand(70, 430) }));
+      g.state.energy = 0;
+      g.state.dead = false;
+      g.state.win = false;
+    },
+    update(g, dt) {
+      if (g.state.dead || g.state.win) return;
+      const s = g.state;
+      s.time += dt;
+      s.p.x = clamp(s.p.x + (((keys.d || keys.ArrowRight) ? 1 : 0) - ((keys.a || keys.ArrowLeft) ? 1 : 0)) * s.p.speed * dt, 12, W - 12);
+      s.p.y = clamp(s.p.y + (((keys.s || keys.ArrowDown) ? 1 : 0) - ((keys.w || keys.ArrowUp) ? 1 : 0)) * s.p.speed * dt, 12, H - 12);
+
+      s.wisps = s.wisps.filter((w) => {
+        if (circleHit(s.p, w, 18)) {
+          s.energy += 1;
+          return false;
+        }
+        return true;
+      });
+
+      const target = s.runes[s.nextRune];
+      if (target && circleHit(s.p, target, 20) && s.energy > 0) {
+        s.energy -= 1;
+        s.nextRune += 1;
+      }
+
+      if (s.nextRune >= s.runes.length) s.win = true;
+      if (s.wisps.length === 0 && s.energy === 0 && !s.win) s.dead = true;
+    },
+    draw(g, c) {
+      const s = g.state;
+      c.fillStyle = "#0b1c17";
+      c.fillRect(0, 0, W, H);
+
+      s.runes.forEach((r, i) => {
+        c.fillStyle = i < s.nextRune ? "#67f0c8" : "#335f55";
+        c.fillRect(r.x - 14, r.y - 30, 28, 60);
+      });
+
+      c.fillStyle = "#a8ffd6";
+      s.wisps.forEach((w) => {
+        c.beginPath();
+        c.arc(w.x, w.y, 6 + Math.sin((s.time + w.x) * 2) * 1.5, 0, Math.PI * 2);
+        c.fill();
+      });
+
+      c.fillStyle = "#8fb8ff";
+      c.beginPath();
+      c.arc(s.p.x, s.p.y, 10, 0, Math.PI * 2);
+      c.fill();
+
+      const fogRadius = 120 + (Math.sin(s.time * 1.7) * 0.5 + 0.5) * 170;
+      c.save();
+      c.fillStyle = "rgba(3,8,13,.76)";
+      c.fillRect(0, 0, W, H);
+      c.globalCompositeOperation = "destination-out";
+      c.beginPath();
+      c.arc(s.p.x, s.p.y, fogRadius, 0, Math.PI * 2);
+      c.fill();
+      c.restore();
+
+      drawBanner(g);
+      statusText.textContent = s.dead
+        ? "任务失败：灵火耗尽，符文熄灭。按 R 重开。"
+        : s.win
+          ? "任务成功：林地封印重启！按 R 重开。"
+          : `当前进度：${s.nextRune}/5 · 灵火储备 ${s.energy}`;
+    },
+  };
+
+  game.agents = [logic];
+  return game;
 }
 
-window.addEventListener("keydown", (e) => {
-  keys[e.key.toLowerCase()] = true;
+function createDwarfForgeGame() {
+  const game = {
+    chapter: "第三章",
+    name: "矮人古矿：熔轨跃迁",
+    hint: "A/D 移动，空格切换上下轨。躲避熔岩锤并收集 5 块秘银矿。",
+    state: {},
+    agents: [],
+  };
 
-  if (["arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(e.key.toLowerCase())) {
-    e.preventDefault();
-  }
+  const logic = {
+    init(g) {
+      g.state.p = { x: 120, rail: 0, y: 180 };
+      g.state.rails = [180, 320];
+      g.state.hammers = [];
+      g.state.ores = [];
+      g.state.spawn = 0;
+      g.state.collected = 0;
+      g.state.hp = 3;
+      g.state.dead = false;
+      g.state.win = false;
+      g.state.flipLock = false;
+      g.state.t = 0;
+    },
+    update(g, dt) {
+      if (g.state.dead || g.state.win) return;
+      const s = g.state;
+      s.t += dt;
+      const mv = ((keys.d || keys.ArrowRight) ? 1 : 0) - ((keys.a || keys.ArrowLeft) ? 1 : 0);
+      s.p.x = clamp(s.p.x + mv * 220 * dt, 22, W - 22);
 
-  switch (e.key.toLowerCase()) {
-    case "arrowup":
-    case "w":
-      movePlayer(0, -1);
-      break;
-    case "arrowdown":
-    case "s":
-      movePlayer(0, 1);
-      break;
-    case "arrowleft":
-    case "a":
-      movePlayer(-1, 0);
-      break;
-    case "arrowright":
-    case "d":
-      movePlayer(1, 0);
-      break;
-    case " ":
-      attack();
-      break;
-    case "r":
-      resetGame();
-      break;
-    default:
-      break;
-  }
+      if (!s.flipLock && keys[" "]) {
+        s.p.rail = 1 - s.p.rail;
+        s.flipLock = true;
+      }
+      if (!keys[" "]) s.flipLock = false;
+      s.p.y = s.rails[s.p.rail];
+
+      s.spawn -= dt;
+      if (s.spawn <= 0) {
+        s.spawn = rand(0.45, 0.9);
+        if (Math.random() < 0.62) {
+          s.hammers.push({ x: W + 30, rail: Math.floor(rand(0, 2)), vx: rand(230, 330) });
+        } else {
+          s.ores.push({ x: W + 30, rail: Math.floor(rand(0, 2)), vx: rand(210, 290) });
+        }
+      }
+
+      s.hammers.forEach((h) => (h.x -= h.vx * dt));
+      s.ores.forEach((o) => (o.x -= o.vx * dt));
+      s.hammers = s.hammers.filter((h) => h.x > -40);
+      s.ores = s.ores.filter((o) => o.x > -40);
+
+      s.hammers = s.hammers.filter((h) => {
+        if (Math.abs(h.x - s.p.x) < 18 && h.rail === s.p.rail) {
+          s.hp -= 1;
+          return false;
+        }
+        return true;
+      });
+      s.ores = s.ores.filter((o) => {
+        if (Math.abs(o.x - s.p.x) < 18 && o.rail === s.p.rail) {
+          s.collected += 1;
+          return false;
+        }
+        return true;
+      });
+
+      if (s.hp <= 0) s.dead = true;
+      if (s.collected >= 5) s.win = true;
+    },
+    draw(g, c) {
+      const s = g.state;
+      c.fillStyle = "#150d09";
+      c.fillRect(0, 0, W, H);
+      c.fillStyle = "#523326";
+      s.rails.forEach((y) => c.fillRect(0, y - 6, W, 12));
+
+      c.fillStyle = "#6ec5ff";
+      c.fillRect(s.p.x - 12, s.p.y - 12, 24, 24);
+      c.fillStyle = "#ff8f72";
+      s.hammers.forEach((h) => c.fillRect(h.x - 13, s.rails[h.rail] - 13, 26, 26));
+      c.fillStyle = "#d8d0ff";
+      s.ores.forEach((o) => c.fillRect(o.x - 9, s.rails[o.rail] - 9, 18, 18));
+
+      c.fillStyle = "rgba(255,130,80,.25)";
+      c.fillRect(0, H - 70 + Math.sin(s.t * 4) * 8, W, 80);
+
+      drawBanner(g);
+      statusText.textContent = s.dead
+        ? "任务失败：被熔岩锤击倒。按 R 重开。"
+        : s.win
+          ? "任务成功：秘银矿收集完成！按 R 重开。"
+          : `秘银矿 ${s.collected}/5 · 生命 ${s.hp}`;
+    },
+  };
+
+  game.agents = [logic];
+  return game;
+}
+
+function createDragonRidgeGame() {
+  const game = {
+    chapter: "第四章",
+    name: "龙脊山口：焰息突围",
+    hint: "W/S 或 ↑/↓ 上下飞行。龙焰会提前瞄准并爆发，生存 30 秒。",
+    state: {},
+    agents: [],
+  };
+
+  const logic = {
+    init(g) {
+      g.state.p = { x: 140, y: 250 };
+      g.state.time = 0;
+      g.state.markers = [];
+      g.state.cooldown = 1;
+      g.state.dead = false;
+      g.state.win = false;
+    },
+    update(g, dt) {
+      if (g.state.dead || g.state.win) return;
+      const s = g.state;
+      s.time += dt;
+      s.p.y = clamp(s.p.y + (((keys.s || keys.ArrowDown) ? 1 : 0) - ((keys.w || keys.ArrowUp) ? 1 : 0)) * 220 * dt, 20, H - 20);
+
+      s.cooldown -= dt;
+      if (s.cooldown <= 0) {
+        s.cooldown = rand(0.8, 1.5);
+        s.markers.push({ y: s.p.y, phase: "warn", t: 0.6 });
+      }
+
+      s.markers.forEach((m) => {
+        m.t -= dt;
+        if (m.phase === "warn" && m.t <= 0) {
+          m.phase = "fire";
+          m.t = 0.55;
+        }
+      });
+
+      s.markers.forEach((m) => {
+        if (m.phase === "fire" && Math.abs(s.p.y - m.y) < 30) s.dead = true;
+      });
+      s.markers = s.markers.filter((m) => m.t > 0);
+
+      if (s.time >= 30) s.win = true;
+    },
+    draw(g, c) {
+      const s = g.state;
+      c.fillStyle = "#100b1f";
+      c.fillRect(0, 0, W, H);
+
+      c.fillStyle = "#2d2745";
+      for (let i = 0; i < 8; i++) {
+        c.fillRect(i * 120, 320 - ((i % 2) * 80), 90, 210);
+      }
+
+      s.markers.forEach((m) => {
+        if (m.phase === "warn") {
+          c.fillStyle = "rgba(255,190,120,.35)";
+          c.fillRect(240, m.y - 16, W - 240, 32);
+        } else {
+          c.fillStyle = "rgba(255,90,70,.62)";
+          c.fillRect(240, m.y - 20, W - 240, 40);
+        }
+      });
+
+      c.fillStyle = "#79d3ff";
+      c.beginPath();
+      c.moveTo(s.p.x - 12, s.p.y);
+      c.lineTo(s.p.x + 12, s.p.y - 10);
+      c.lineTo(s.p.x + 12, s.p.y + 10);
+      c.closePath();
+      c.fill();
+
+      c.fillStyle = "#c84758";
+      c.fillRect(W - 70, 80, 40, 40);
+      c.fillStyle = "#f6e6ba";
+      c.fillText("龙", W - 55, 106);
+
+      drawBanner(g);
+      statusText.textContent = s.dead
+        ? "任务失败：被龙焰命中。按 R 重开。"
+        : s.win
+          ? "任务成功：你穿过了龙脊山口！按 R 重开。"
+          : `生存倒计时：${Math.ceil(30 - s.time)} 秒`;
+    },
+  };
+
+  game.agents = [logic];
+  return game;
+}
+
+function createArcaneTowerGame() {
+  const game = {
+    chapter: "第五章",
+    name: "奥术高塔：镜像决斗",
+    hint: "WASD 移动。你的镜像会延迟 2 秒复制轨迹，触碰即失败；收集 7 枚法印获胜。",
+    state: {},
+    agents: [],
+  };
+
+  const logic = {
+    init(g) {
+      g.state.p = { x: 90, y: 250, speed: 200 };
+      g.state.mirror = { x: 90, y: 250 };
+      g.state.history = [];
+      g.state.sigils = Array.from({ length: 7 }, () => ({ x: rand(220, 860), y: rand(60, 440) }));
+      g.state.dead = false;
+      g.state.win = false;
+    },
+    update(g, dt) {
+      if (g.state.dead || g.state.win) return;
+      const s = g.state;
+      const dx = ((keys.d || keys.ArrowRight) ? 1 : 0) - ((keys.a || keys.ArrowLeft) ? 1 : 0);
+      const dy = ((keys.s || keys.ArrowDown) ? 1 : 0) - ((keys.w || keys.ArrowUp) ? 1 : 0);
+      s.p.x = clamp(s.p.x + dx * s.p.speed * dt, 14, W - 14);
+      s.p.y = clamp(s.p.y + dy * s.p.speed * dt, 14, H - 14);
+
+      s.history.push({ x: s.p.x, y: s.p.y });
+      if (s.history.length > 120) {
+        const delayed = s.history.shift();
+        s.mirror.x = delayed.x;
+        s.mirror.y = delayed.y;
+      }
+
+      s.sigils = s.sigils.filter((sigil) => !circleHit(s.p, sigil, 18));
+      if (circleHit(s.p, s.mirror, 16)) s.dead = true;
+      if (s.sigils.length === 0) s.win = true;
+    },
+    draw(g, c) {
+      const s = g.state;
+      c.fillStyle = "#0b1023";
+      c.fillRect(0, 0, W, H);
+
+      c.strokeStyle = "#384b8a";
+      c.beginPath();
+      s.history.forEach((h, i) => {
+        if (i === 0) c.moveTo(h.x, h.y);
+        else c.lineTo(h.x, h.y);
+      });
+      c.stroke();
+
+      c.fillStyle = "#6f7dff";
+      s.sigils.forEach((sigil) => {
+        c.beginPath();
+        c.arc(sigil.x, sigil.y, 8, 0, Math.PI * 2);
+        c.fill();
+      });
+
+      c.fillStyle = "#ff7893";
+      c.beginPath();
+      c.arc(s.mirror.x, s.mirror.y, 10, 0, Math.PI * 2);
+      c.fill();
+
+      c.fillStyle = "#8ec1ff";
+      c.beginPath();
+      c.arc(s.p.x, s.p.y, 10, 0, Math.PI * 2);
+      c.fill();
+
+      drawBanner(g);
+      statusText.textContent = s.dead
+        ? "任务失败：镜像吞没了你。按 R 重开。"
+        : s.win
+          ? "终章完成：你成为艾斯塔拉新任守护者！按 R 重开。"
+          : `剩余法印：${s.sigils.length}`;
+    },
+  };
+
+  game.agents = [logic];
+  return game;
+}
+
+const games = [
+  createGuildCourierGame(),
+  createElvenRunesGame(),
+  createDwarfForgeGame(),
+  createDragonRidgeGame(),
+  createArcaneTowerGame(),
+];
+
+let active = 0;
+let last = performance.now();
+
+function mountTabs() {
+  gameTabs.innerHTML = "";
+  games.forEach((g, i) => {
+    const btn = document.createElement("button");
+    btn.className = `tab-btn ${i === active ? "active" : ""}`;
+    btn.textContent = `${g.chapter} ${g.name}`;
+    btn.addEventListener("click", () => switchGame(i));
+    gameTabs.appendChild(btn);
+  });
+}
+
+function switchGame(i) {
+  active = i;
+  mountTabs();
+  const g = games[active];
+  AgentEngine.mount(g);
+  chapterTitle.textContent = `${g.chapter}｜${g.name}`;
+  controlHint.textContent = `操作：${g.hint}`;
+}
+
+document.addEventListener("keydown", (e) => {
+  keys[e.key] = true;
+  if (e.key === " ") e.preventDefault();
+  if (e.key.toLowerCase() === "r") switchGame(active);
 });
 
-window.addEventListener("keyup", (e) => {
-  keys[e.key.toLowerCase()] = false;
+document.addEventListener("keyup", (e) => {
+  keys[e.key] = false;
 });
 
-resetGame();
-gameLoop();
+function loop(ts) {
+  const dt = Math.min((ts - last) / 1000, 0.033);
+  last = ts;
+  AgentEngine.step(games[active], dt);
+  requestAnimationFrame(loop);
+}
+
+switchGame(0);
+requestAnimationFrame(loop);

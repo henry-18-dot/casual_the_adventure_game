@@ -3,18 +3,48 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>迷你地下城冒险</title>
+    <title>艾斯塔拉编年史：五章试炼</title>
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <div class="game-shell">
-      <h1>迷你地下城冒险</h1>
-      <canvas id="game" width="640" height="480" aria-label="2D 地下城游戏画面"></canvas>
-      <div class="hud">
-        <p><strong>操作：</strong>方向键 / WASD 移动，<kbd>空格</kbd>挥剑，<kbd>R</kbd>重开</p>
-        <p id="status">加载中...</p>
-      </div>
-    </div>
+    <main class="app">
+      <header>
+        <h1>艾斯塔拉编年史：五章试炼</h1>
+        <p>同一奇幻世界观下的 5 个独立创新冒险小游戏（核心玩法优先）</p>
+      </header>
+
+      <section class="meta-grid">
+        <article class="panel">
+          <h2>世界观锚点（经典奇幻）</h2>
+          <ul>
+            <li>冒险者公会与酒馆委托</li>
+            <li>精灵林地与古代符文遗迹</li>
+            <li>矮人矿井与机关工艺</li>
+            <li>巨龙山脊与龙焰威胁</li>
+            <li>高塔法师与奥术试炼</li>
+          </ul>
+        </article>
+        <article class="panel">
+          <h2>执行计划（已落地）</h2>
+          <ol>
+            <li>5 个游戏彼此独立，可单独重开。</li>
+            <li>统一 Agent 生命周期：init / update / draw。</li>
+            <li>每个游戏只做一个创新核心机制。</li>
+            <li>画面极简，但反馈必须清晰动态。</li>
+          </ol>
+        </article>
+      </section>
+
+      <nav id="gameTabs" class="tabs" aria-label="章节选择"></nav>
+      <canvas id="gameCanvas" width="900" height="500" aria-label="游戏主画布"></canvas>
+
+      <section class="panel hud">
+        <p id="chapterTitle"></p>
+        <p id="controlHint"></p>
+        <p id="status">初始化中...</p>
+      </section>
+    </main>
+
     <script src="game.js"></script>
   </body>
 </html>
